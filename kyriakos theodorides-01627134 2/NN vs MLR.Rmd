@@ -1,0 +1,326 @@
+---
+title: "Neural Network vs Multiple Linear Regression"
+author: "Kyriakos Theodorides"
+date: "26/04/2020"
+output: html_document
+---
+
+```{r setup, cache = F}
+knitr::opts_chunk$set(error = TRUE)
+```
+
+
+```{r}
+library(bannerCommenter)
+       banner("Marketing Analytics","Individual Research:","Kyriakos Theodorides","Imperial College London", emph = TRUE) 
+
+```
+
+```{r}
+library(neuralnet)  # regression
+library(tidyverse)
+library(caret)
+library(nnet) # classification 
+library(NeuralNetTools)
+library(plyr)
+library(h2o)
+library(ggplot2)
+library(dplyr)
+library(keras)
+library(dplyr)
+library(cloudml)
+```
+
+
+# NEURAL NETWORK
+```{r}
+# Data Loading
+startups <- read.csv("50_startups.csv")
+class(startups)
+head(startups)
+```
+
+
+```{r}
+#make State variable numeric in order to eliminate any errors while modelling
+startups$State <- as.numeric(revalue(startups$State,
+                          c("New York"="0", "California"="1",
+                            "Florida"="2")))
+#str(startups)
+```
+
+
+```{r}
+#compute the correlations
+cor(startups)
+
+```
+
+
+Normalize the dataset
+```{r}
+#normalise data
+maxs <- apply(startups, 2, max) 
+mins <- apply(startups, 2, min)
+scaled <- as.data.frame(scale(startups, center = mins, scale = maxs - mins))
+```
+
+ Split the data into train and test set
+```{r}
+## set the seed to make your partition reproducible
+#set.seed(123)
+
+train_ind <- sample(seq_len(nrow(startups)), size = floor(nrow(startups) * 0.7))
+
+train <- scaled[train_ind,]
+test <- scaled[-train_ind,]
+```
+
+
+
+
+Model a neural network model with training data
+```{r}
+nn_model <- neuralnet(Profit~ R.D.Spend + Administration
+                            + Marketing.Spend + State, 
+                      data = train,
+                      linear.output = TRUE,
+                      err.fct = 'sse'
+                      )
+str(nn_model)
+```
+
+```{r}
+summary(nn_model)
+```
+
+Plot nn
+```{r}
+#rep='best' means it plots the repetition with the smallest error
+plot(nn_model, rep = "best")
+```
+
+
+Compute Error and Compare Performance
+
+```{r}
+nn_model$result.matrix['error',]
+```
+
+```{r}
+# Evaluating model performance
+
+set.seed(12323)
+nn_performance <- neuralnet::compute(nn_model, test[1:4])
+predicted_profit <- nn_performance$net.result
+
+# Predicted profit Vs Actual profit of test data.
+cor(predicted_profit,test$Profit)
+
+```
+
+
+
+De-normalise the data and get RMSE
+```{r}
+#revert the fitted value back to original scale
+fitted.train <- nn_model$net.result[[1]] * (max(startups$Profit)-min(startups$Profit))+min(startups$Profit)
+
+#use the index to get the original value of profit in train dataset. 
+train.r <- startups$Profit[train_ind]
+
+#calculate the Root Mean Squared Error of train dataset
+rmse.train <- (sum((train.r - fitted.train )^2)/nrow(fitted.train))^0.5
+
+rmse.train
+```
+
+
+Improve the model performance by increasing hidden neurons
+```{r}
+# Improve the model performance :
+set.seed(12345)
+nn2 <- neuralnet(Profit~R.D.Spend+Administration
+        +Marketing.Spend+State,
+        data = train,
+        linear.output=TRUE, 
+        err.fct = 'sse',
+        hidden = 2)
+
+```
+
+```{r}
+#rep='best' means it plots the repetition with the smallest error
+plot(nn2 ,rep = "best")
+```
+
+```{r}
+summary(nn2)
+```
+
+Compute Error and Compare Performance
+
+```{r}
+nn2$result.matrix['error',]
+```
+
+
+```{r}
+# Evaluating 2nd model performance
+nn_performance2 <- neuralnet::compute(nn2,test[1:4])
+predicted_profit2 <- nn_performance2$net.result
+
+# Predicted profit Vs Actual profit of test data.
+cor(predicted_profit2,test$Profit)
+```
+
+
+De-normalise the data and get RMSE
+```{r}
+#revert the fitted value back to original scale
+fitted.train2 <- nn2$net.result[[1]] * (max(startups$Profit)-min(startups$Profit))+min(startups$Profit)
+
+#use the index to get the original value of profit in train dataset. 
+train.r2 <- startups$Profit[train_ind]
+
+#calculate the Root Mean Squared Error of train dataset
+rmse.train2 <- (sum((train.r2 - fitted.train2 )^2)/nrow(fitted.train2))^0.5
+
+rmse.train2
+```
+
+
+De-normalise the data and get the Actual Profits Predictions
+
+```{r}
+# since the prediction is in Normalized form, we need to de-normalize it 
+# to get the actual prediction on profit
+str_max <- max(startups$Profit)
+str_min <- min(startups$Profit)
+
+unnormalize <- function(x, min, max) { 
+  return( (max - min)*x + min )
+}
+```
+
+```{r}
+
+ActualProfit_pred2 <- unnormalize(predicted_profit2, str_min, str_max)
+head(ActualProfit_pred2)
+```
+
+
+
+```{r}
+par(mar = numeric(4), family = 'serif')
+plotnet(nn2, alpha = 0.6)
+```
+
+
+SSE(Error) has been reduced and training steps had been increased as the number of neurons  under hidden layer are increased from 1 to 2
+
+
+
+
+# MULTIPLE LINEAR REGRESSION
+
+Load data
+```{r}
+df <- read.csv("50_startups.csv")
+```
+
+```{r}
+df$State <- as.numeric(revalue(df$State,
+                          c("New York"="0", "California"="1",
+                            "Florida"="2")))
+```
+Creating Dependent and Independent Variable
+```{r}
+dependent_variable = c("Profit")
+independent_variable<-  names(df)[(!(names(df) %in% c('Profit')))]
+```
+
+
+Assumptions of Linear Regression:
+1) Multivariate normality 
+2) Linear Relationship
+3) No Multicollinearity
+4) Heteroscedasticity 
+
+
+Distribution of variables for normality checks
+```{r}
+ggplot(df, aes(x=Profit)) + geom_histogram(aes(y=..density..),colour="black", fill="white") + 
+  geom_density(alpha=.2, fill="#FF6666")
+```
+
+Correlation Check to establish Linear Relationship
+```{r}
+cor(df$Profit , df[independent_variable])
+
+```
+
+
+Correlation between Independent Variables
+```{r}
+cor(df[independent_variable] , df[independent_variable])
+```
+
+
+
+```{r}
+set.seed(40)
+#Random numbers
+randomobs <- sample(seq_len(nrow(df)), size = floor(0.7 * nrow(df)))
+
+# Train dataset
+train.df <- df[randomobs,]
+
+#Test dataset
+test.df <- df[-randomobs,]
+```
+
+Fittina Multiple Linear Regression
+```{r}
+mlr_model <- lm( Profit ~ . ,train.df)
+summary(mlr_model)
+```
+
+ 
+The above representation shows the summary of a multiple linear regression model.
+The first table shows the distribution of the residuals or the error terms.
+The second table gives us the statistics about the co-efficients of the variables
+1) Estimate - This is the co-efficent of the variables in the equation
+2) Std. Error - This represents the deviation in the co-efficient if different samples with the same distribution are used for modelling
+3) t value - Test statistic derived from the estimate and standard error computed as the ratio of the two variables (Estimate / Standard Error)
+4) Pr(>|t|) - This is the p-value derived from the test statistic used for determinimg the importance of the variable. 
+
+
+Compute RMSE
+```{r}
+pred_regression <- predict(mlr_model, test.df %>% select(-Profit),type='response')
+
+print(sqrt(mean((test.df$Profit - pred_regression)^2)))
+```
+
+
+```{r}
+#compute R-square
+R2(pred_regression, test$Profit)
+```
+
+Compare predictions
+```{r}
+final <- head(data.frame(preds_nn = ActualProfit_pred2 , preds_lr = pred_regression, actual=test.df$Profit))
+knitr::kable((final))
+```
+Plotting the Profit Predictions from neural Network model and the actual Profit values from the test set
+```{r}
+#test.df has the de-normalised ovserved values
+plot(ActualProfit_pred2,test.df$Profit)
+```
+
+References:  
+https://rpubs.com/thirus83/453911  
+https://rpubs.com/shyambv/linear_neural_network  
+Dr. Gokhan Yildirim Lectures
